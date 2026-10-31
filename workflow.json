@@ -1,0 +1,335 @@
+{
+  "name": "Analisador de vagas",
+  "nodes": [
+    {
+      "parameters": {
+        "formTitle": "Analisador de Vagas",
+        "formDescription": "Preencha o texto OU o link. Se preencher os dois, o texto é usado.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Texto da vaga",
+              "fieldType": "textarea"
+            },
+            {
+              "fieldLabel": "Seu curriculo",
+              "fieldType": "textarea",
+              "requiredField": true
+            },
+            {
+              "fieldLabel": "Link da vaga",
+              "fieldType": "textarea"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.6,
+      "position": [
+        -256,
+        -144
+      ],
+      "id": "7c438003-8cd7-4d07-9fc5-9db51a9f88c6",
+      "name": "Formulário",
+      "webhookId": "8609715e-4bcf-4413-a1cd-385f3faae13b",
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 2000,
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-3.5-flash-lite",
+          "mode": "list",
+          "cachedResultName": "Gemini 3.5 Flash Lite"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Extraia as informações da vaga abaixo e responda SOMENTE com JSON válido, sem texto antes ou depois e sem markdown, neste formato:\n{\"cargo\": \"\", \"senioridade\": \"\", \"requisitos_obrigatorios\": [], \"diferenciais\": [], \"responsabilidades\": []}\n\nRegras: use apenas informações presentes no texto. Se algo não aparecer, use \"\" ou [].\n\nVaga:\n{{ $json[\"Texto da vaga\"] }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        176,
+        -144
+      ],
+      "id": "9e545ce3-1acb-4666-9a00-3b6ce52f6eeb",
+      "name": "Extração de requisitos",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "Il5BANT74ABwjawm",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-3.5-flash-lite",
+          "mode": "list",
+          "cachedResultName": "Gemini 3.5 Flash Lite"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=Você compara uma vaga com um currículo. Responda SOMENTE com JSON válido, sem markdown, neste formato:\n{\"requisitos\": [{\"item\": \"\", \"tipo\": \"obrigatorio\", \"categoria\": \"tecnico\", \"status\": \"atende\", \"evidencia\": \"\"}], \"sugestoes\": []}\n\nRegras:\n- Avalie cada item de requisitos_obrigatorios (tipo \"obrigatorio\") e de diferenciais (tipo \"diferencial\").\n- status deve ser exatamente: \"atende\", \"parcial\" ou \"nao_atende\".\n- categoria deve ser exatamente: \"tecnico\" (linguagens, ferramentas, conhecimentos técnicos), \"comportamental\" (comunicação, trabalho em equipe e semelhantes) ou \"elegibilidade\" (curso, matrícula, disponibilidade, modelo de trabalho, localidade, idioma, prazo de formatura).\n- evidencia: trecho curto do currículo que justifica. Se não houver, use \"\".\n- Use SOMENTE o que está escrito no currículo. Não presuma habilidades que não estão nele.\n- sugestoes: até 3 ações práticas e específicas para reduzir as lacunas.\n\nVaga (JSON):\n{{ JSON.stringify($json.vaga) }}\n\nCurrículo:\n{{ $json.cv_texto }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        640,
+        -144
+      ],
+      "id": "64df454d-a13d-43ed-a33e-b0ad3c598f9f",
+      "name": "Comparação com o CV",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "Il5BANT74ABwjawm",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const entrada = $('Formulário').first().json;\nconst texto = $input.first().json.content.parts[0].text;\nconst vaga = JSON.parse(texto.replace(/```json|```/g, \"\").trim());\n\nif (!entrada[\"Seu curriculo\"]) {\n  throw new Error(\"Campo do currículo vazio. Campos recebidos: \" + Object.keys(entrada).join(\", \"));\n}\nif (!vaga.cargo) {\n  throw new Error(\"A IA não extraiu a vaga. Confira se o texto chegou ao prompt.\");\n}\n\nreturn [{ json: { vaga, cv_texto: entrada[\"Seu curriculo\"], link: (entrada[\"Link da vaga\"] || \"\").trim() } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        448,
+        -144
+      ],
+      "id": "591e14ca-d37b-40cc-ad43-5793abb00987",
+      "name": "Interpretar vaga"
+    },
+    {
+      "parameters": {
+        "jsCode": "const entrada = $('Interpretar vaga').first().json; // nome do PRIMEIRO Code\nconst texto = $input.first().json.content.parts[0].text;\nconst analise = JSON.parse(texto.replace(/```json|```/g, \"\").trim());\nconst sugestoes = analise.sugestoes ?? [];\n\nconst valor = { atende: 1, parcial: 0.5, nao_atende: 0 };\nlet pontos = 0;\nlet total = 0;\nfor (const r of analise.requisitos) {\n  if (r.categoria !== \"tecnico\") continue; // só itens técnicos entram na nota\n  const peso = r.tipo === \"obrigatorio\" ? 2 : 1; // obrigatório vale o dobro\n  pontos += (valor[r.status] ?? 0) * peso;\n  total += peso;\n}\nconst nota = total ? Math.round((pontos / total) * 100) : 0;\n\nconst icone = { atende: \"✅\", parcial: \"🟡\", nao_atende: \"❌\" };\nconst tecnicos = analise.requisitos.filter(r => r.categoria === \"tecnico\");\nconst comportamentais = analise.requisitos.filter(r => r.categoria === \"comportamental\");\nconst elegibilidade = analise.requisitos.filter(r => r.categoria !== \"tecnico\" && r.categoria !== \"comportamental\");\n\nconst linhas = [\n  `Vaga: ${entrada.vaga.cargo}`,\n  ...(entrada.link ? [`Link: ${entrada.link}`] : []),\n  `Aderência técnica: ${nota}/100`,\n  \"\",\n  \"Requisitos técnicos:\",\n  ...tecnicos.map(r => `${icone[r.status] ?? \"❔\"} ${r.item} (${r.tipo})${r.evidencia ? \" - \" + r.evidencia : \"\"}`),\n];\nif (comportamentais.length) {\n  linhas.push(\"\", \"Comportamentais (não entram na nota):\", ...comportamentais.map(r => `• ${r.item}`));\n}\nif (elegibilidade.length) {\n  linhas.push(\"\", \"Elegibilidade (não entra na nota):\", ...elegibilidade.map(r => `${icone[r.status] ?? \"❔\"} ${r.item}${r.evidencia ? \" - \" + r.evidencia : \"\"}`));\n}\nif (sugestoes.length) {\n  linhas.push(\"\", \"Sugestões:\", ...sugestoes.map(s => `• ${s}`));\n}\n\nreturn [{ json: {\n  cargo: entrada.vaga.cargo,\n  nota,\n  requisitos: analise.requisitos,\n  sugestoes,\n  mensagem: linhas.join(\"\\n\"),\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        976,
+        -128
+      ],
+      "id": "5c34d01b-9657-46aa-a879-06ea9616b61a",
+      "name": "Calcular nota"
+    },
+    {
+      "parameters": {
+        "operation": "completion",
+        "completionTitle": "Resultado da análise",
+        "completionMessage": "={{ $json.mensagem }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.form",
+      "typeVersion": 2.5,
+      "position": [
+        1152,
+        64
+      ],
+      "id": "9706f8f8-4e45-423f-93b9-6b8adc5323af",
+      "name": "Tela de Resultado",
+      "webhookId": "c3879906-1a84-478d-b1ad-eb139c0f7192"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "cf27f688-066f-43bc-8ed6-d859cb2d7a58",
+              "leftValue": "={{ ($json[\"Texto da vaga\"] || \"\").trim().length > 40 }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.4,
+      "position": [
+        -80,
+        -144
+      ],
+      "id": "82ccb8d9-5c25-4946-ace2-2e67fd7444ef",
+      "name": "Tem texto?"
+    },
+    {
+      "parameters": {
+        "url": "={{ $json[\"Link da vaga\"] }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "html"
+            }
+          },
+          "timeout": 20000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -144,
+        112
+      ],
+      "id": "bdd75b5c-999a-4827-af16-3e3f42eb93a4",
+      "name": "Baixar página da vaga",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const entrada = $('Formulário').first().json;\nconst link = (entrada[\"Link da vaga\"] || \"\").trim();\n\nif (!/^https?:\\/\\//i.test(link)) {\n  throw new Error(\"Informe o texto da vaga ou um link válido (começando com http).\");\n}\n\nconst resposta = $input.first().json;\nconst html = String(resposta.html ?? resposta.data ?? \"\");\n\nconst texto = html\n  .replace(/<script[\\s\\S]*?<\\/script>/gi, \" \")\n  .replace(/<style[\\s\\S]*?<\\/style>/gi, \" \")\n  .replace(/<[^>]+>/g, \" \")\n  .replace(/&nbsp;/g, \" \")\n  .replace(/&amp;/g, \"&\")\n  .replace(/\\s+/g, \" \")\n  .trim()\n  .slice(0, 12000);\n\nif (texto.length < 300) {\n  throw new Error('Não consegui ler o conteúdo do link (o site pode ter bloqueado ou carregar a vaga por JavaScript). Cole o texto da vaga no campo \"Texto da vaga\".');\n}\n\nreturn [{ json: { ...entrada, \"Texto da vaga\": texto } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        80,
+        64
+      ],
+      "id": "100eaacb-f9b6-468f-b7a4-5f6d0c82698a",
+      "name": "Extrair texto da página"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Formulário": {
+      "main": [
+        [
+          {
+            "node": "Tem texto?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extração de requisitos": {
+      "main": [
+        [
+          {
+            "node": "Interpretar vaga",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Comparação com o CV": {
+      "main": [
+        [
+          {
+            "node": "Calcular nota",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Interpretar vaga": {
+      "main": [
+        [
+          {
+            "node": "Comparação com o CV",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calcular nota": {
+      "main": [
+        [
+          {
+            "node": "Tela de Resultado",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tem texto?": {
+      "main": [
+        [
+          {
+            "node": "Extração de requisitos",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Baixar página da vaga",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Baixar página da vaga": {
+      "main": [
+        [
+          {
+            "node": "Extrair texto da página",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extrair texto da página": {
+      "main": [
+        [
+          {
+            "node": "Extração de requisitos",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "versionId": "a73b0170-00fc-47e1-a823-34a461eecec3",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "4878cda827e890457b31167c4a6c96332b453e536d318a8767d0d9f665f5be26"
+  },
+  "nodeGroups": [],
+  "id": "I1EOVJpZucspZejo",
+  "tags": []
+}
