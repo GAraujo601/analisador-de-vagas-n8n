@@ -3,8 +3,8 @@
 Workflow no n8n que recebe uma vaga (texto ou link) e um currículo por um formulário,
 compara os dois e devolve uma nota técnica com a evidência de cada requisito.
 
-![Workflow](docs/canvas.png)
-![Resultado](docs/resultado.png)
+![Workflow](docs/canvas.PNG)
+![Resultado](docs/resultado.jpg)
 
 ## Para que serve
 
